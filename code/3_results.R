@@ -31,8 +31,8 @@ agd_col <- scale_colour_distiller("AGD score", type="seq", palette="PuRd", direc
 lice_col <- scale_colour_distiller("Lice/fish\n(all spp.)", type="seq", palette="PuBuGn", direction=-1)
 mort_y <- scale_y_continuous("Weekly mortality rate (%)", limits=c(0, 0.3), breaks=c(0, 0.1, 0.2))
 lice_y <- scale_y_continuous("Mean lice per fish", limits=c(0, 1), breaks=seq(0, 1, by=0.5))
-pub_theme <- theme(legend.key.height=unit(0.1, "cm"),
-                   plot.title=element_text(size=9), 
+conf_cols <- c("80-90%"="#67a9cf", "90-95%"="#1c9099", "\u2265 95%"="#016c59")
+pub_theme <- theme(plot.title=element_text(size=9), 
                    axis.title=element_text(size=9),
                    axis.text=element_text(size=8),
                    legend.text=element_text(size=7),
@@ -71,6 +71,8 @@ saveRDS(ce.1D, "out/mort_ce1D.rds")
 saveRDS(ce, "out/mort_ceAll.rds")
 
 
+
+# * Fig 4 -----------------------------------------------------------------
 # create plot of effects with >80% confidence
 ci_level <- 0.8
 ce.1D <- readRDS("out/mort_ce1D.rds")
@@ -78,13 +80,33 @@ ce <- readRDS("out/mort_ceAll.rds")
 eff.sig <- filter(mort.eff$sig.eff.names[[1]], .width==ci_level)$term %>% 
   gsub("(temperature_z+)(:)(.+)", "\\3\\2\\1", .) %>%
   gsub("(waveHeight+)(:)(.+)", "\\3\\2\\1", .)
-ce.sig <- ce[eff.sig]
-plot.ls <- c(map(ce.sig, ~.x + mort_y + wave_col + pub_theme))
+eff.sigLevel <- mort.eff$sig.eff.names[[1]] %>%
+  arrange(desc(.width)) %>%
+  group_by(term) %>%
+  slice_head(n=1) %>%
+  filter(.width > ci_level) %>%
+  mutate(term=term %>% 
+           gsub("(temperature_z+)(:)(.+)", "\\3\\2\\1", .) %>%
+           gsub("(waveHeight+)(:)(.+)", "\\3\\2\\1", .),
+         conf=case_when(.width==0.8 ~ "80-90%",
+                        .width==0.9 ~ "90-95%",
+                        .width==0.95 ~ "\u2265 95%"),
+         col=conf_cols[conf]) 
+ce.sig <- ce[eff.sigLevel$term]
+plot.ls <- c(map(seq_along(ce.sig), ~ce.sig[[.x]] + 
+                   annotate("text", hjust=0, vjust=0.5, size=3,
+                            x=ce.sig[[.x]]$data$effect1__[1], y=mort_y$limits[2], 
+                            label=paste(eff.sigLevel$conf[.x], "conf."), 
+                            colour=eff.sigLevel$col[.x]) +
+                   mort_y + wave_col + pub_theme + 
+                   theme(legend.key.height=unit(0.1, "cm"))))
 mort.80.p <- ggarrange(plotlist=plot.ls, ncol=2, nrow=1, 
                        common.legend=T, legend="bottom", labels="auto")
 ggsave("figs/fig_4.jpg", mort.80.p, width=140, height=70, units="mm", dpi=300)
 
 
+
+# * Summary values --------------------------------------------------------
 # Conditional and marginal R2
 bayes_R2(mort.fit[[1]])
 bayes_R2(mort.fit[[1]], re_formula=NA)
@@ -121,6 +143,7 @@ ce$`temperature_z:waveHeight`$data %>%
 # load data and output
 lice.dat <- read_csv("out/lepFe_data.csv")
 lice.fit <- list(lepFe=readRDS("out/lepFe_fit.rds"))
+lepFe.png <- png::readPNG("data/L_salmonis_gravid_female.png")
 
 
 # summarise effects and calculate conditional effects
@@ -145,31 +168,98 @@ saveRDS(ce.1D, "out/lepFe_ce1D.rds")
 saveRDS(ce, "out/lepFe_ceAll.rds")
 
 
+
+# * Fig 6 -----------------------------------------------------------------
 # create plot of effects with >80% confidence
 ci_level <- 0.8
 ce.1D <- readRDS("out/lepFe_ce1D.rds")
 ce <- readRDS("out/lepFe_ceAll.rds")
-eff.sig <- filter(lice.eff$sig.eff.names[[1]], .width==ci_level)$term %>% 
-  gsub("(biomass_density_z+)(:)(.+)", "\\3\\2\\1", .) %>%
-  gsub("(temperature_z+)(:)(.+)", "\\3\\2\\1", .) %>%
-  gsub("(waveHeight+)(:)(.+)", "\\3\\2\\1", .)
-ce.1D.sig <- ce.1D[grep(":|^waveHeight", eff.sig, invert=T, value=T)]
-ce.sig <- ce[eff.sig]
+eff.sigLevel <- lice.eff$sig.eff.names[[1]] %>%
+  arrange(desc(.width)) %>%
+  group_by(term) %>%
+  slice_head(n=1) %>%
+  filter(.width >= ci_level) %>%
+  mutate(term=term %>% 
+           gsub("(biomass_density_z+)(:)(.+)", "\\3\\2\\1", .) %>%
+           gsub("(temperature_z+)(:)(.+)", "\\3\\2\\1", .) %>%
+           gsub("(waveHeight+)(:)(.+)", "\\3\\2\\1", .),
+         conf=case_when(.width==0.8 ~ "80-90%",
+                        .width==0.9 ~ "90-95%",
+                        .width==0.95 ~ "\u2265 95%"),
+         col=conf_cols[conf]) 
+
+ce.1D.sig <- ce.1D[grep(":|^waveHeight", eff.sigLevel$term, invert=T, value=T)]
+ce.sig <- ce[eff.sigLevel$term]
 plot.ls <- c(map(names(ce.1D.sig),
-                 ~ce.sig[[.x]] + lice_y + wave_col + pub_theme +
+                 ~ce.sig[[.x]] +
+                   geom_point(data=ce.sig[[.x]]$data[1,] %>% mutate(fakeColumn="A"),
+                              aes(colour=fakeColumn)) +
+                   annotate("text", hjust=0, vjust=0.5, size=3,
+                            x=ce.sig[[.x]]$data$effect1__[1], y=lice_y$limits[2], 
+                            label=paste(filter(eff.sigLevel, term==.x)$conf, "conf."), 
+                            colour=filter(eff.sigLevel, term==.x)$col) +
+                   lice_y + pub_theme +
+                   scale_colour_manual(values="white") +
+                   theme(legend.title=element_text(colour="white"),
+                         legend.key=element_blank(),
+                         legend.text=element_text(colour="white")) +
                    geom_ribbon(aes(ymin=pmax(lower__, 0), ymax=pmin(upper__, 1)), fill="grey", alpha=0.5) +
-                   geom_line(colour="blue", size=1.25)),
-             map(ce.sig["agd_score_z:waveHeight"], ~.x + lice_y + wave_col + pub_theme),
-             map(ce.sig["waterSpeed_z:agd_score_z"], ~.x + lice_y + agd_col + pub_theme),
-             map(ce.sig["temperature_z:waveHeight"], ~.x + lice_y + wave_col + pub_theme),
-             map(ce.sig["wksSinceAntiAGD_z:waveHeight"], ~.x + lice_y + wave_col + pub_theme),
-             map(ce.sig["wksSinceAntiAGD_z:temp_z"], ~.x + lice_y + temp_col + pub_theme),
-             map(ce.sig["wksSinceMedi_z:waveHeight"], ~.x + lice_y + wave_col + pub_theme))
+                   geom_line(colour="blue")),
+             map(ce.sig["agd_score_z:waveHeight"], ~.x + 
+                   annotate("text", hjust=0, vjust=0.5, size=3,
+                            x=ce.sig[["agd_score_z:waveHeight"]]$data$effect1__[1], y=lice_y$limits[2], 
+                            label=paste(filter(eff.sigLevel, term=="agd_score_z:waveHeight")$conf, "conf."), 
+                            colour=filter(eff.sigLevel, term=="agd_score_z:waveHeight")$col) +
+                   lice_y + wave_col + pub_theme + 
+                   theme(legend.key.width=unit(0.1, "cm"))),
+             map(ce.sig["waterSpeed_z:agd_score_z"], ~.x + 
+                   annotate("text", hjust=0, vjust=0.5, size=3,
+                            x=ce.sig[["waterSpeed_z:agd_score_z"]]$data$effect1__[1], y=lice_y$limits[2], 
+                            label=paste(filter(eff.sigLevel, term=="waterSpeed_z:agd_score_z")$conf, "conf."), 
+                            colour=filter(eff.sigLevel, term=="waterSpeed_z:agd_score_z")$col) +
+                   lice_y + agd_col + pub_theme + 
+                   theme(legend.key.width=unit(0.1, "cm"))),
+             map(ce.sig["temperature_z:waveHeight"], ~.x + 
+                   annotate("text", hjust=0, vjust=0.5, size=3,
+                            x=ce.sig[["temperature_z:waveHeight"]]$data$effect1__[1], y=lice_y$limits[2], 
+                            label=paste(filter(eff.sigLevel, term=="temperature_z:waveHeight")$conf, "conf."), 
+                            colour=filter(eff.sigLevel, term=="temperature_z:waveHeight")$col) +
+                   lice_y + wave_col + pub_theme + 
+                   theme(legend.key.width=unit(0.1, "cm"))),
+             map(ce.sig["wksSinceAntiAGD_z:waveHeight"], ~.x + 
+                   annotate("text", hjust=0, vjust=0.5, size=3,
+                            x=ce.sig[["wksSinceAntiAGD_z:waveHeight"]]$data$effect1__[1], y=lice_y$limits[2], 
+                            label=paste(filter(eff.sigLevel, term=="wksSinceAntiAGD_z:waveHeight")$conf, "conf."), 
+                            colour=filter(eff.sigLevel, term=="wksSinceAntiAGD_z:waveHeight")$col) +
+                   lice_y + wave_col + pub_theme + 
+                   theme(legend.key.width=unit(0.1, "cm"))),
+             map(ce.sig["wksSinceAntiAGD_z:temperature_z"], ~.x + 
+                   annotate("text", hjust=0, vjust=0.5, size=3,
+                            x=ce.sig[["wksSinceAntiAGD_z:temperature_z"]]$data$effect1__[1], y=lice_y$limits[2], 
+                            label=paste(filter(eff.sigLevel, term=="wksSinceAntiAGD_z:temperature_z")$conf, "conf."), 
+                            colour=filter(eff.sigLevel, term=="wksSinceAntiAGD_z:temperature_z")$col) +
+                   lice_y + temp_col + pub_theme + 
+                   theme(legend.key.width=unit(0.1, "cm"))),
+             map(ce.sig["wksSinceMedi_z:waveHeight"], ~.x + 
+                   annotate("text", hjust=0, vjust=0.5, size=3,
+                            x=ce.sig[["wksSinceMedi_z:waveHeight"]]$data$effect1__[1], y=lice_y$limits[2], 
+                            label=paste(filter(eff.sigLevel, term=="wksSinceMedi_z:waveHeight")$conf, "conf."), 
+                            colour=filter(eff.sigLevel, term=="wksSinceMedi_z:waveHeight")$col) +
+                   lice_y + wave_col + pub_theme + 
+                   theme(legend.key.width=unit(0.1, "cm"))), 
+             list(ggplot() + 
+                    annotation_custom(grid::rasterGrob(lepFe.png)) + 
+                    ggtitle("") +
+                    theme(axis.line=element_blank(),
+                          axis.title=element_blank(),
+                          axis.text=element_blank())))
 lice.80.p <- ggarrange(plotlist=plot.ls, ncol=2, nrow=4, 
                        common.legend=F, labels=c(letters[1:7], ""))
-ggsave("figs/pub/fig_6.jpg", lice.80.p, width=140, height=200, units="mm", dpi=300)
+ggsave("figs/fig_6.jpg", lice.80.p, width=140, height=200, units="mm", dpi=300)
 
 
+
+# * Summary values --------------------------------------------------------
 # Conditional and marginal R2
 bayes_R2(lice.fit[[1]])
 bayes_R2(lice.fit[[1]], re_formula=NA)
@@ -185,7 +275,7 @@ ce$days_since_start_z$data %>%
 # AGD: Lice at low vs high AGD
 ce$`agd_score_z:waveHeight`$data %>% 
   ungroup %>% 
-  filter(round(effect1__,2)==1.4) %>%
+  filter(round(effect1__,2)==1.4) %>%  # expm1(1.4) = approx 3
   mutate(across(one_of("estimate__", "lower__", "upper__"), 
                 ~.x/first(.x), 
                 .names="propDiff_{.col}"))
@@ -224,6 +314,8 @@ pred.df <- pred.df %>%
   mutate(p_mort_mn_natural=boot::inv.logit(p_mort_mn*sd(mort.dat$lmortRate) + 
                                              mean(mort.dat$lmortRate)))
 
+
+# * Fig 3 -----------------------------------------------------------------
 # mortality
 ggplot(pred.df, aes(day)) +
   geom_point(alpha=0.5, size=0.5, shape=1, aes(y=boot::inv.logit(lmortRate))) +
@@ -244,6 +336,8 @@ ggplot(pred.df, aes(day)) +
 ggsave("figs/fig_3.jpg", width=140, height=140, units="mm", dpi=300)
 
 
+
+# * Fig 5 -----------------------------------------------------------------
 # sea lice
 ggplot(pred.df, aes(day)) +
   geom_point(alpha=0.5, size=0.5, shape=1, aes(y=expm1(lep_fe))) +
